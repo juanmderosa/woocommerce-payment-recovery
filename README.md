@@ -33,13 +33,12 @@
 - **WordPress:** 5.0 o superior
 - **PHP:** 7.4 o superior  
 - **WooCommerce:** 3.0 o superior
-- **ActionScheduler:** Incluido en WooCommerce 7.0+, o instálalo como plugin
+- **ActionScheduler:** Incluido en WooCommerce 7.0+n
 
 ### Verificar dependencias
 
 1. Ve a **WooCommerce > Estado del sitio**
 2. Busca "ActionScheduler" - debe mostrar "✅ Disponible"
-3. Si no aparece, instala el plugin `Action Scheduler` desde el repositorio
 
 ---
 
