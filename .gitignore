@@ -1,0 +1,40 @@
+# PHP
+*.php~
+*.phtml
+.DS_Store
+
+# WordPress
+wp-config.php
+wp-content/cache/
+wp-content/uploads/
+wp-content/upgrade/
+wp-content/backup-*
+wp-content/debug.log
+
+# Composer
+vendor/
+composer.lock
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.sln
+*.csproj
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+.env
+.env.local
+
+# Testing
+.phpunit.result.cache
+coverage/
+
+# Node (si se usa build tools)
+node_modules/
+npm-debug.log
+yarn-error.log
