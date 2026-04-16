@@ -6,72 +6,73 @@ add_action('init', 'wcpr_restore_cart');
 
 function wcpr_restore_cart()
 {
-    if (!isset($_GET['recover_order_id']) || !isset($_GET['token'])) {
-        return;
-    }
 
-    $order_id = intval($_GET['recover_order_id']);
-    $token = sanitize_text_field($_GET['token']);
+    if (!isset($_GET['recover_cart'])) return;
 
-    if (!$order_id || empty($token)) {
+    $data = base64_decode($_GET['recover_cart']);
+
+    $items = json_decode($data, true);
+
+    if (!is_array($items)) {
         wp_safe_redirect(wc_get_cart_url());
         exit;
     }
 
-    $order = wc_get_order($order_id);
-
-    if (!$order || $order->get_order_key() !== $token) {
-        // En caso de que la orden no exista o el token sea inválido
-        wc_add_notice(__('El enlace de recuperación es inválido o ha expirado.', 'wc-payment-recovery'), 'error');
-        wp_safe_redirect(wc_get_cart_url());
-        exit;
-    }
-
-    // Vaciar el carrito actual para evitar compras duplicadas o artículos no deseados
     WC()->cart->empty_cart();
 
-    // Reconstruir el carrito basándonos en la orden original
-    foreach ($order->get_items() as $item) {
-        $product_id = $item->get_product_id();
-        $qty = $item->get_quantity();
-        $variation_id = $item->get_variation_id();
-        $variation = array();
+    foreach ($items as $item) {
 
-        if ($variation_id > 0) {
-            foreach ($item->get_meta_data() as $meta) {
-                $key = $meta->key;
-                if (strpos($key, 'pa_') === 0) {
-                    $variation[$key] = $meta->value;
-                }
-            }
-        }
+        $product_id = isset($item['product_id']) ? intval($item['product_id']) : 0;
+        $qty = isset($item['qty']) ? intval($item['qty']) : 1;
+        $variation_id = isset($item['variation_id']) ? intval($item['variation_id']) : 0;
+        $variation = isset($item['variation']) ? (array) $item['variation'] : array();
 
         if ($product_id > 0) {
             WC()->cart->add_to_cart($product_id, $qty, $variation_id, $variation);
         }
     }
 
-    wc_add_notice(__('Tu carrito ha sido restaurado exitosamente.', 'wc-payment-recovery'), 'success');
     wp_safe_redirect(wc_get_cart_url());
     exit;
 }
 
 function wcpr_generate_cart_restore_link($order)
 {
-    if (!$order) {
-        return wc_get_cart_url();
+
+    $items = [];
+
+    foreach ($order->get_items() as $item) {
+
+        $product_id = $item->get_product_id();
+        $qty = $item->get_quantity();
+        $variation_id = $item->get_variation_id();
+        $variation = array();
+
+        // Capturar los atributos de la variación
+        if ($variation_id > 0) {
+            foreach ($item->get_meta_data() as $meta) {
+
+                $key = $meta->key;
+
+                // Filtrar solo los atributos (comienzan con "pa_")
+                if (strpos($key, 'pa_') === 0) {
+
+                    $variation[$key] = $meta->value;
+                }
+            }
+        }
+
+        $items[] = array(
+            'product_id' => $product_id,
+            'qty' => $qty,
+            'variation_id' => $variation_id,
+            'variation' => $variation
+        );
     }
 
-    $order_id = $order->get_id();
-    $token = $order->get_order_key();
+    $encoded = base64_encode(json_encode($items));
 
-    return add_query_arg(
-        array(
-            'recover_order_id' => $order_id,
-            'token' => $token
-        ),
-        site_url('/')
-    );
+    return site_url('/?recover_cart=' . $encoded);
 }
 
 

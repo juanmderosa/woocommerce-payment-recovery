@@ -20,7 +20,6 @@
 ✅ **3 correos de recordatorio automáticos** con tiempos configurables  
 ✅ **Cancelación automática** de órdenes impagadas  
 ✅ **Botones dinámicos** para completar pago y restaurar carrito  
-✅ **Dashboard analítico** para visualizar recuperación e ingresos  
 ✅ **Plantillas profesionales** con estilos de WooCommerce  
 ✅ **Totalmente configurable** desde admin de WordPress  
 ✅ **Logs detallados** para debugging  
@@ -29,27 +28,18 @@
 
 ---
 
-## 🚀 Novedades en la Versión 1.1.0
-
-- **Dashboard Analítico:** Nueva pestaña en el panel para contabilizar en tiempo real el total de intentos de recuperación, órdenes recuperadas exitosamente, la tasa de conversión y los ingresos salvados.
-- **Cancelación Inteligente de Tareas:** Los cron-jobs de e-mails pendientes y auto-cancelación se eliminan automáticamente de la cola en ActionScheduler en el momento que un cliente logra realizar el pago de la orden (pasando a estado processing o completed).
-- **Prevención de Correos Duplicados:** Se implementó una verificación con metadatos de órdenes (`_wcpr_recovery_scheduled`) para evitar que bajo ninguna circunstancia se envíen "loops" infinitos o correos paralelos repetidos a un cliente, mejorando la compatibilidad con opciones de terceros.
-- **Flujo Especializado para Órdenes Canceladas:** Al enviar el email de aviso de cancelación, se omiten explícitamente los llamados engañosos a la acción como el botón principal de "Completar Pago".
-- **Limpieza de Arquitectura:** El hook general que validaba contra plugins de terceros (`wcf_ca_should_send_email`) ha sido depurado en favor de un flujo interno nativo y más robusto gobernado por los estados de WooCommerce.
-
----
-
 ## 🔧 Requisitos
 
 - **WordPress:** 5.0 o superior
 - **PHP:** 7.4 o superior  
 - **WooCommerce:** 3.0 o superior
-- **ActionScheduler:** Incluido en WooCommerce 7.0+n
+- **ActionScheduler:** Incluido en WooCommerce 7.0+, o instálalo como plugin
 
 ### Verificar dependencias
 
 1. Ve a **WooCommerce > Estado del sitio**
 2. Busca "ActionScheduler" - debe mostrar "✅ Disponible"
+3. Si no aparece, instala el plugin `Action Scheduler` desde el repositorio
 
 ---
 
@@ -491,5 +481,5 @@ Para reportar bugs o sugerencias, abre un issue en GitHub o contactame a juanmde
 
 ---
 
-**Última actualización:** 16 de abril de 2026  
-**Versión:** 1.1.0
+**Última actualización:** 12 de marzo de 2026  
+**Versión:** 1.0.1

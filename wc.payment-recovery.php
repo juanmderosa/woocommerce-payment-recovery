@@ -3,7 +3,7 @@
 Plugin Name: WooCommerce Payment Recovery
 Description: Recuperación de pagos fallidos o pendientes.
 Author: JuanmderosaDeveloper
-Version: 1.0.0
+Version: 1.1.0
 Requires at least: 5.0
 Requires PHP: 7.4
 */
@@ -13,42 +13,83 @@ if (!defined('ABSPATH')) {
 }
 
 define('WCPR_PATH', plugin_dir_path(__FILE__));
-define('WCPR_VERSION', '1.0.0');
+define('WCPR_VERSION', '1.1.0');
 
-// SIEMPRE cargar los archivos básicos
+// SIEMPRE cargar los archivos básicos independientes
 require_once WCPR_PATH . 'includes/validations.php';
 require_once WCPR_PATH . 'includes/diagnostics.php';
-
-// Cargar verificación temprana
 require_once WCPR_PATH . 'includes/verify.php';
-
-// Cargar flow logger para diagnosticar el flujo
 require_once WCPR_PATH . 'includes/flow-logger.php';
+require_once WCPR_PATH . 'includes/settings.php'; // Settings es seguro de cargar temprano
 
-// CARGAR DEPENDENCIAS TEMPRANO - Antes de registrar los hooks
-// Estos son necesarios para que wcpr_schedule_recovery() funcione
-require_once WCPR_PATH . 'includes/settings.php';
-require_once WCPR_PATH . 'includes/scheduler.php';
-require_once WCPR_PATH . 'includes/hooks.php';
-require_once WCPR_PATH . 'includes/cancel-orders.php';
+// Inicializar opciones por defecto al activar el plugin
+register_activation_hook(__FILE__, 'wcpr_set_default_options');
 
-// FUNCIONES DE HOOKS DE ÓRDENES - Definidas temprano en el plugin
+// Cargar admin SIEMPRE si estamos en admin
+if (is_admin()) {
+    require_once WCPR_PATH . 'includes/admin.php';
+    require_once WCPR_PATH . 'includes/diagnostics-advanced.php';
+}
+
+// Cargar las dependencias y registrar hooks de WooCommerce cuando WP termine de cargar los plugins
+add_action('plugins_loaded', 'wcpr_bootstrap_plugin');
+
+function wcpr_bootstrap_plugin()
+{
+    // Verificar si WooCommerce está activo
+    if (!class_exists('WooCommerce')) {
+        return;
+    }
+
+    // CARGAR DEPENDENCIAS (que asumen que WC existe)
+    require_once WCPR_PATH . 'includes/scheduler.php';
+    require_once WCPR_PATH . 'includes/hooks.php';
+    require_once WCPR_PATH . 'includes/cancel-orders.php';
+    require_once WCPR_PATH . 'includes/debug.php';
+
+    // REGISTRAR LOS HOOKS DE ÓRDENES Y EMAILS
+    add_filter('woocommerce_email_classes', 'wcpr_register_emails_direct', 0);
+    add_action('woocommerce_checkout_order_processed', 'wcpr_schedule_recovery', 10, 1);
+    add_action('woocommerce_order_status_pending', 'wcpr_schedule_recovery_on_status_change', 10, 2);
+    add_action('woocommerce_order_status_failed', 'wcpr_schedule_recovery_on_status_change', 10, 2);
+    add_action('woocommerce_order_status_processing', 'wcpr_mark_as_recovered_on_status_change', 10, 2);
+    add_action('woocommerce_order_status_completed', 'wcpr_mark_as_recovered_on_status_change', 10, 2);
+}
+
+// FUNCIONES DE HOOKS DE ÓRDENES
+function wcpr_mark_as_recovered_on_status_change($order_id, $order)
+{
+    // Solo nos importa si había sido programada para recuperación
+    if (!$order->get_meta('_wcpr_recovery_scheduled')) {
+        return;
+    }
+
+    // Si ya está marcada como recuperada, no hacer nada
+    if ($order->get_meta('_wcpr_recovered')) {
+        return;
+    }
+
+    wcpr_log('💰 Orden recuperada exitosamente', ['order_id' => $order_id, 'status' => $order->get_status()]);
+    $order->update_meta_data('_wcpr_recovered', '1');
+    $order->save();
+
+    // Cancelar acciones programadas para esta orden
+    if (function_exists('as_unschedule_all_actions')) {
+        as_unschedule_all_actions('wcpr_send_email_1', array($order_id), 'wc-payment-recovery');
+        as_unschedule_all_actions('wcpr_send_email_2', array($order_id), 'wc-payment-recovery');
+        as_unschedule_all_actions('wcpr_send_email_3', array($order_id), 'wc-payment-recovery');
+        as_unschedule_all_actions('wcpr_cancel_order', array($order_id), 'wc-payment-recovery');
+        wcpr_log('🚫 Acciones de recuperación canceladas para la orden', ['order_id' => $order_id]);
+    }
+}
+
 function wcpr_schedule_recovery_on_status_change($order_id, $order)
 {
     wcpr_log('📍 Hook: Cambio de estado de orden', ['order_id' => $order_id, 'status' => $order->get_status()]);
 
-    // Verificar si ya tiene acciones programadas
-    if (function_exists('as_get_scheduled_actions')) {
-        $scheduled = as_get_scheduled_actions([
-            'hook' => 'wcpr_send_email_1',
-            'args' => [$order_id],
-            'status' => 'pending',
-        ]);
-
-        if (!empty($scheduled)) {
-            wcpr_log('⏭️  Ya hay acciones programadas para esta orden', ['order_id' => $order_id]);
-            return;
-        }
+    if ($order->get_meta('_wcpr_recovery_scheduled')) {
+        wcpr_log('⏭️  Ya se programaron las acciones de recuperación para esta orden anteriormente', ['order_id' => $order_id]);
+        return;
     }
 
     wcpr_schedule_recovery($order_id);
@@ -79,20 +120,19 @@ function wcpr_schedule_recovery($order_id)
         return;
     }
 
+    if ($order->get_meta('_wcpr_recovery_scheduled')) {
+        wcpr_log('⏭️  Ya se programaron las acciones de recuperación para esta orden anteriormente', ['order_id' => $order_id]);
+        return;
+    }
+
     wcpr_log('⏰ Programando emails para orden', ['order_id' => $order_id, 'status' => $status]);
     wcpr_schedule_emails($order_id);
+
+    $order->update_meta_data('_wcpr_recovery_scheduled', '1');
+    $order->save();
+
     wcpr_log('✓ Emails programados exitosamente', ['order_id' => $order_id]);
 }
-
-// REGISTRAR EL FILTRO DIRECTAMENTE - SIN HOOKS
-// Esto asegura que se registre antes de que WooCommerce cargue
-add_filter('woocommerce_email_classes', 'wcpr_register_emails_direct', 0);
-
-// REGISTRAR HOOKS DE ÓRDENES DIRECTAMENTE - MUY TEMPRANO
-// Esto asegura que se registren antes del checkout
-add_action('woocommerce_checkout_order_processed', 'wcpr_schedule_recovery', 10, 1);
-add_action('woocommerce_order_status_pending', 'wcpr_schedule_recovery_on_status_change', 10, 2);
-add_action('woocommerce_order_status_failed', 'wcpr_schedule_recovery_on_status_change', 10, 2);
 
 function wcpr_register_emails_direct($emails)
 {
@@ -128,41 +168,4 @@ function wcpr_register_emails_direct($emails)
         wcpr_log('✗ ERROR registrando emails: ' . $e->getMessage(), ['linea' => $e->getLine()]);
         return $emails;
     }
-}
-
-// Cargar admin SIEMPRE si estamos en admin (no esperar a que WooCommerce se cargue)
-if (is_admin()) {
-    require_once WCPR_PATH . 'includes/settings.php';
-    require_once WCPR_PATH . 'includes/admin.php';
-    require_once WCPR_PATH . 'includes/diagnostics-advanced.php';
-}
-
-// Cargar el plugin cuando WooCommerce esté disponible
-add_action('after_setup_theme', 'wcpr_init_plugin', 999);
-
-function wcpr_init_plugin()
-{
-    // Verificar si las dependencias críticas están disponibles
-    if (!function_exists('wc_get_order')) {
-        return;
-    }
-
-    if (!function_exists('as_schedule_single_action')) {
-        return;
-    }
-
-    if (!class_exists('WC_Email')) {
-        return;
-    }
-
-    // Cargar configuración (de nuevo si no está en admin)
-    if (!is_admin()) {
-        require_once WCPR_PATH . 'includes/settings.php';
-    }
-
-    // Cargar debug
-    require_once WCPR_PATH . 'includes/debug.php';
-
-    // Resto del plugin (ya está cargado en el archivo raíz)
-    // do_action('wcpr_loaded');
 }
