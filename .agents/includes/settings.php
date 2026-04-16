@@ -41,16 +41,15 @@ function wcpr_sanitize_settings($input)
     $out = [];
 
     foreach ($defaults as $key => $default) {
-        if (strpos($key, '_enabled') !== false) {
-            // Es un checkbox. Si existe en el input, es 'yes', si no, es 'no'.
-            $out[$key] = isset($input[$key]) && $input[$key] === 'yes' ? 'yes' : 'no';
-        } else {
-            // Es un número u otro campo. Si no existe, usamos el valor por defecto.
-            if (isset($input[$key])) {
-                $out[$key] = intval($input[$key]);
+        if (isset($input[$key])) {
+            // booleans stored as 'yes' / 'no' for checkboxes
+            if (strpos($key, '_enabled') !== false) {
+                $out[$key] = $input[$key] === 'yes' ? 'yes' : 'no';
             } else {
-                $out[$key] = $default;
+                $out[$key] = intval($input[$key]);
             }
+        } else {
+            $out[$key] = $default;
         }
     }
 

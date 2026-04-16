@@ -18,105 +18,17 @@ function wcpr_admin_menu()
     );
 }
 
-function wcpr_get_dashboard_metrics()
-{
-    $transient_key = 'wcpr_dashboard_metrics';
-    $metrics = get_transient($transient_key);
-
-    if (false === $metrics) {
-        // Obtenemos los intentos (todas las órdenes que tuvieron recuperación programada)
-        $attempts_args = array(
-            'limit' => -1,
-            'return' => 'ids',
-            'meta_key' => '_wcpr_recovery_scheduled',
-            'meta_value' => '1'
-        );
-        $attempts = wc_get_orders($attempts_args);
-        $total_attempts = count($attempts);
-
-        // Obtenemos las órdenes recuperadas
-        $recovered_args = array(
-            'limit' => -1,
-            'return' => 'objects',
-            'meta_key' => '_wcpr_recovered',
-            'meta_value' => '1'
-        );
-        $recovered_orders = wc_get_orders($recovered_args);
-        $total_recovered = count($recovered_orders);
-
-        $total_revenue = 0;
-        foreach ($recovered_orders as $order) {
-            $total_revenue += (float) $order->get_total();
-        }
-
-        $conversion_rate = $total_attempts > 0 ? round(($total_recovered / $total_attempts) * 100, 2) : 0;
-
-        $metrics = array(
-            'attempts' => $total_attempts,
-            'recovered' => $total_recovered,
-            'revenue' => wc_price($total_revenue),
-            'conversion' => $conversion_rate
-        );
-
-        // Guardamos por 5 minutos para un balance entre performance y tiempo real
-        set_transient($transient_key, $metrics, 5 * MINUTE_IN_SECONDS);
-    }
-
-    return $metrics;
-}
-
 function wcpr_settings_page()
 {
-    $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'dashboard';
 ?>
     <div class="wrap">
         <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
 
-        <h2 class="nav-tab-wrapper">
-            <a href="?page=wcpr-settings&tab=dashboard" class="nav-tab <?php echo $active_tab == 'dashboard' ? 'nav-tab-active' : ''; ?>">Dashboard</a>
-            <a href="?page=wcpr-settings&tab=settings" class="nav-tab <?php echo $active_tab == 'settings' ? 'nav-tab-active' : ''; ?>">Configuración</a>
-        </h2>
-
-        <?php if ($active_tab == 'dashboard') : ?>
-            <?php $metrics = wcpr_get_dashboard_metrics(); ?>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px;">
-                <div style="background: #fff; border: 1px solid #ccd0d4; padding: 20px; text-align: center; border-radius: 5px;">
-                    <h3 style="margin-top:0;">Intentos de Recuperación</h3>
-                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #0073aa;"><?php echo esc_html($metrics['attempts']); ?></p>
-                </div>
-                <div style="background: #fff; border: 1px solid #ccd0d4; padding: 20px; text-align: center; border-radius: 5px;">
-                    <h3 style="margin-top:0;">Pedidos Recuperados</h3>
-                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #46b450;"><?php echo esc_html($metrics['recovered']); ?></p>
-                </div>
-                <div style="background: #fff; border: 1px solid #ccd0d4; padding: 20px; text-align: center; border-radius: 5px;">
-                    <h3 style="margin-top:0;">Tasa de Conversión</h3>
-                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #d64e07;"><?php echo esc_html($metrics['conversion']); ?>%</p>
-                </div>
-                <div style="background: #fff; border: 1px solid #ccd0d4; padding: 20px; text-align: center; border-radius: 5px;">
-                    <h3 style="margin-top:0;">Ingresos Recuperados</h3>
-                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #46b450;"><?php echo wp_kses_post($metrics['revenue']); ?></p>
-                </div>
-            </div>
-            
-            <form method="post" action="" style="margin-top:20px;">
-                <?php wp_nonce_field('wcpr_clear_cache_nonce', 'wcpr_nonce'); ?>
-                <input type="submit" name="wcpr_clear_cache" class="button" value="Actualizar Estadísticas Ahora">
-            </form>
-            
-            <?php
-            if (isset($_POST['wcpr_clear_cache']) && check_admin_referer('wcpr_clear_cache_nonce', 'wcpr_nonce')) {
-                delete_transient('wcpr_dashboard_metrics');
-                echo '<script>window.location.href="?page=wcpr-settings&tab=dashboard";</script>';
-            }
-            ?>
-
-        <?php else : ?>
-            <form action="options.php" method="post" style="margin-top: 20px;">
+        <form action="options.php" method="post">
                 <?php settings_fields('wcpr_settings_group'); ?>
                 <?php do_settings_sections('wcpr_settings'); ?>
                 <?php submit_button('Guardar configuración'); ?>
             </form>
-        <?php endif; ?>
     </div>
 <?php
 }
