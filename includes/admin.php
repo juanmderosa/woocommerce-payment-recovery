@@ -18,47 +18,72 @@ function wcpr_admin_menu()
     );
 }
 
-function wcpr_get_dashboard_metrics()
+function wcpr_get_dashboard_metrics($period_days = 30)
 {
-    $transient_key = 'wcpr_dashboard_metrics';
+    $transient_key = 'wcpr_dashboard_metrics_' . $period_days;
     $metrics = get_transient($transient_key);
 
     if (false === $metrics) {
-        // Obtenemos los intentos (todas las órdenes que tuvieron recuperación programada)
-        $attempts_args = array(
-            'limit' => -1,
-            'return' => 'ids',
-            'meta_key' => '_wcpr_recovery_scheduled',
-            'meta_value' => '1'
-        );
-        $attempts = wc_get_orders($attempts_args);
-        $total_attempts = count($attempts);
+        $current_time = current_time('timestamp');
+        $start_date = $current_time - ($period_days * DAY_IN_SECONDS);
+        $prev_start_date = $start_date - ($period_days * DAY_IN_SECONDS);
+        
+        $get_counts = function($start, $end) {
+            $attempts_args = array(
+                'limit' => -1,
+                'return' => 'ids',
+                'meta_key' => '_wcpr_recovery_scheduled',
+                'meta_value' => '1',
+                'date_created' => $start . '...' . $end
+            );
+            $attempts = count(wc_get_orders($attempts_args));
 
-        // Obtenemos las órdenes recuperadas
-        $recovered_args = array(
-            'limit' => -1,
-            'return' => 'objects',
-            'meta_key' => '_wcpr_recovered',
-            'meta_value' => '1'
-        );
-        $recovered_orders = wc_get_orders($recovered_args);
-        $total_recovered = count($recovered_orders);
+            $recovered_args = array(
+                'limit' => -1,
+                'return' => 'objects',
+                'meta_key' => '_wcpr_recovered',
+                'meta_value' => '1',
+                'date_created' => $start . '...' . $end
+            );
+            $recovered_orders = wc_get_orders($recovered_args);
+            $recovered = count($recovered_orders);
 
-        $total_revenue = 0;
-        foreach ($recovered_orders as $order) {
-            $total_revenue += (float) $order->get_total();
-        }
+            $revenue = 0;
+            foreach ($recovered_orders as $order) {
+                $revenue += (float) $order->get_total();
+            }
 
-        $conversion_rate = $total_attempts > 0 ? round(($total_recovered / $total_attempts) * 100, 2) : 0;
+            $conversion = $attempts > 0 ? round(($recovered / $attempts) * 100, 2) : 0;
+            
+            return array(
+                'attempts' => $attempts,
+                'recovered' => $recovered,
+                'revenue' => $revenue,
+                'conversion' => $conversion
+            );
+        };
+
+        $current = $get_counts($start_date, $current_time);
+        $previous = $get_counts($prev_start_date, $start_date);
+        
+        $calc_diff = function($curr, $prev) {
+            if ($prev == 0) return $curr > 0 ? 100 : 0;
+            return round((($curr - $prev) / $prev) * 100, 1);
+        };
 
         $metrics = array(
-            'attempts' => $total_attempts,
-            'recovered' => $total_recovered,
-            'revenue' => wc_price($total_revenue),
-            'conversion' => $conversion_rate
+            'current' => $current,
+            'current_formatted' => array(
+                'revenue' => wc_price($current['revenue'])
+            ),
+            'comparative' => array(
+                'attempts' => $calc_diff($current['attempts'], $previous['attempts']),
+                'recovered' => $calc_diff($current['recovered'], $previous['recovered']),
+                'conversion' => round($current['conversion'] - $previous['conversion'], 1),
+                'revenue' => $calc_diff($current['revenue'], $previous['revenue'])
+            )
         );
 
-        // Guardamos por 5 minutos para un balance entre performance y tiempo real
         set_transient($transient_key, $metrics, 5 * MINUTE_IN_SECONDS);
     }
 
@@ -78,35 +103,64 @@ function wcpr_settings_page()
         </h2>
 
         <?php if ($active_tab == 'dashboard') : ?>
-            <?php $metrics = wcpr_get_dashboard_metrics(); ?>
+            <?php 
+                $period_days = isset($_GET['period_days']) ? intval($_GET['period_days']) : 30;
+                $valid_periods = array(7 => 'Última Semana (7 días)', 15 => 'Últimos 15 Días', 30 => 'Último Mes (30 días)');
+                if (!array_key_exists($period_days, $valid_periods)) $period_days = 30;
+                $metrics = wcpr_get_dashboard_metrics($period_days); 
+                
+                if (!function_exists('wcpr_render_diff')) {
+                    function wcpr_render_diff($diff) {
+                        if ($diff == 0) return '<span style="color: #666; font-size: 14px;">= 0% vs anterior</span>';
+                        $color = $diff > 0 ? '#46b450' : '#dc3232';
+                        $arrow = $diff > 0 ? '↑' : '↓';
+                        return sprintf('<span style="color: %s; font-size: 14px; font-weight: normal;">%s %s%% vs anterior</span>', $color, $arrow, abs($diff));
+                    }
+                }
+            ?>
+            
+            <form method="get" action="">
+                <input type="hidden" name="page" value="wcpr-settings">
+                <input type="hidden" name="tab" value="dashboard">
+                <div style="margin-top: 20px; padding: 10px; background: #fff; border: 1px solid #ccd0d4; border-radius: 5px; display: flex; gap: 15px; align-items: center;">
+                    <label for="period_days"><strong>Mostrar datos de:</strong></label>
+                    <select name="period_days" id="period_days" onchange="this.form.submit()">
+                        <?php foreach($valid_periods as $val => $label): ?>
+                            <option value="<?php echo $val; ?>" <?php selected($period_days, $val); ?>><?php echo $label; ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <input type="submit" name="wcpr_clear_cache" class="button button-secondary" value="Actualizar Estadísticas Ahora">
+                </div>
+                <?php wp_nonce_field('wcpr_clear_cache_nonce', 'wcpr_nonce'); ?>
+            </form>
+
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px;">
                 <div style="background: #fff; border: 1px solid #ccd0d4; padding: 20px; text-align: center; border-radius: 5px;">
                     <h3 style="margin-top:0;">Intentos de Recuperación</h3>
-                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #0073aa;"><?php echo esc_html($metrics['attempts']); ?></p>
+                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #0073aa;"><?php echo esc_html($metrics['current']['attempts']); ?></p>
+                    <?php echo wcpr_render_diff($metrics['comparative']['attempts']); ?>
                 </div>
                 <div style="background: #fff; border: 1px solid #ccd0d4; padding: 20px; text-align: center; border-radius: 5px;">
                     <h3 style="margin-top:0;">Pedidos Recuperados</h3>
-                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #46b450;"><?php echo esc_html($metrics['recovered']); ?></p>
+                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #46b450;"><?php echo esc_html($metrics['current']['recovered']); ?></p>
+                    <?php echo wcpr_render_diff($metrics['comparative']['recovered']); ?>
                 </div>
                 <div style="background: #fff; border: 1px solid #ccd0d4; padding: 20px; text-align: center; border-radius: 5px;">
                     <h3 style="margin-top:0;">Tasa de Conversión</h3>
-                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #d64e07;"><?php echo esc_html($metrics['conversion']); ?>%</p>
+                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #d64e07;"><?php echo esc_html($metrics['current']['conversion']); ?>%</p>
+                    <?php echo wcpr_render_diff($metrics['comparative']['conversion']); ?>
                 </div>
                 <div style="background: #fff; border: 1px solid #ccd0d4; padding: 20px; text-align: center; border-radius: 5px;">
                     <h3 style="margin-top:0;">Ingresos Recuperados</h3>
-                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #46b450;"><?php echo wp_kses_post($metrics['revenue']); ?></p>
+                    <p style="font-size: 2em; margin: 10px 0; font-weight: bold; color: #46b450;"><?php echo wp_kses_post($metrics['current_formatted']['revenue']); ?></p>
+                    <?php echo wcpr_render_diff($metrics['comparative']['revenue']); ?>
                 </div>
             </div>
             
-            <form method="post" action="" style="margin-top:20px;">
-                <?php wp_nonce_field('wcpr_clear_cache_nonce', 'wcpr_nonce'); ?>
-                <input type="submit" name="wcpr_clear_cache" class="button" value="Actualizar Estadísticas Ahora">
-            </form>
-            
             <?php
-            if (isset($_POST['wcpr_clear_cache']) && check_admin_referer('wcpr_clear_cache_nonce', 'wcpr_nonce')) {
-                delete_transient('wcpr_dashboard_metrics');
-                echo '<script>window.location.href="?page=wcpr-settings&tab=dashboard";</script>';
+            if (isset($_GET['wcpr_clear_cache']) && check_admin_referer('wcpr_clear_cache_nonce', 'wcpr_nonce')) {
+                delete_transient('wcpr_dashboard_metrics_' . $period_days);
+                echo '<script>window.location.href="?page=wcpr-settings&tab=dashboard&period_days=' . $period_days . '";</script>';
             }
             ?>
 
